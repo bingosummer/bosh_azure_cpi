@@ -49,10 +49,10 @@ describe Bosh::AzureCloud::VMManager do
     let(:public_ips) {
       [
         {
-          :ip_address => "reserved-ip"
+          :ip_address => "public-ip"
         },
         {
-          :ip_address => "not-reserved-ip"
+          :ip_address => "not-public-ip"
         }
       ]
     }
@@ -68,8 +68,8 @@ describe Bosh::AzureCloud::VMManager do
         and_return("fake-vip-network")
       allow(client2).to receive(:list_public_ips).
         and_return(public_ips)
-      allow(network_configurator).to receive(:reserved_ip).
-        and_return("reserved-ip")
+      allow(network_configurator).to receive(:public_ip).
+        and_return("public-ip")
       allow(network_configurator).to receive(:tcp_endpoints).
         and_return("fake-tcp-endpoints")
       allow(network_configurator).to receive(:udp_endpoints).
@@ -82,7 +82,6 @@ describe Bosh::AzureCloud::VMManager do
       allow(client2).to receive(:create_network_interface)
       allow(client2).to receive(:get_network_interface_by_name).
         with(uuid).and_return(network_interface)
-      allow(disk_manager).to receive(:create_container)
       allow(network_configurator).to receive(:dns).
         and_return("fake-dns")
       allow(disk_manager).to receive(:get_disk_uri).and_return("fake-disk-uri")
@@ -108,7 +107,7 @@ describe Bosh::AzureCloud::VMManager do
         expect(client2).not_to receive(:delete_load_balancer)
         expect {
           vm_manager.create(uuid, stemcell_uri, azure_properties, network_configurator, resource_pool)
-        }.to raise_error /Cannot find the reserved IP address/
+        }.to raise_error /Cannot find the public IP address/
       end
     end
 

@@ -6,32 +6,6 @@ describe Bosh::AzureCloud::DiskManager do
 
   let(:disk_name) { "fake-disk-123" }
 
-  describe "#create_container" do
-    context "the container exists" do
-      before do
-        allow(blob_manager).to receive(:container_exist?).
-          and_return(true)
-      end
-      it "does not create the container" do
-        expect(blob_manager).not_to receive(:create_container)
-
-        disk_manager.create_container()
-      end
-    end
-
-    context "the container does not exist" do
-      before do
-        allow(blob_manager).to receive(:container_exist?).
-          and_return(false)
-      end
-      it "creates the container" do
-        expect(blob_manager).to receive(:create_container)
-
-        disk_manager.create_container()
-      end
-    end
-  end  
-
   describe "#delete_disk" do
     context "the disk exists" do
       before do
@@ -84,8 +58,6 @@ describe Bosh::AzureCloud::DiskManager do
   describe "#create_disk" do
     it "returns the disk name" do
       size = 100
-      allow(blob_manager).to receive(:container_exist?).
-          and_return(true)
       expect(blob_manager).to receive(:create_empty_vhd_blob)
       expect(disk_manager.create_disk(size)).not_to be_empty
     end

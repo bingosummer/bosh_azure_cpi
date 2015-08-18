@@ -235,7 +235,7 @@ describe Bosh::AzureCloud::Cloud do
   end
 
   describe '#set_vm_metadata' do
-    let(:metadata) { {} }
+    let(:metadata) { {"user-agent"=>"bosh"} }
 
     it 'should set the vm metadata' do
       expect(vm_manager).to receive(:set_metadata).with(instance_id, metadata)

@@ -11,49 +11,6 @@ describe Bosh::AzureCloud::BlobManager do
     allow(Azure::BlobService).to receive(:new).and_return(blob_service_client)
   end
 
-  describe "#create_container" do
-    it "creates the container" do
-      expect(blob_service_client).to receive(:create_container).
-        with(container_name).
-        and_return(instance_double("Azure::Blob::Container", :name => container_name))
-
-      blob_manager.create_container(container_name)
-    end
-  end  
-
-  describe "#container_exist?" do
-    context "succeed to get container properties" do
-      before do
-        allow(blob_service_client).to receive(:get_container_properties).
-          and_return(instance_double("Azure::Blob::Container", :name => container_name))
-      end
-
-      it "return true" do
-        expect(blob_manager.container_exist?(container_name)).to be(true)
-      end
-    end
-
-    context "fail to get container properties and get 404" do
-      before do
-        allow(blob_service_client).to receive(:get_container_properties).and_raise("(404)")
-      end
-      it "return false" do
-        expect(blob_manager.container_exist?(container_name)).to be(false)
-      end
-    end
-
-    context "fail to get container properties and get no 404" do
-      before do
-        allow(blob_service_client).to receive(:get_container_properties).and_raise("Not exist")
-      end
-      it "raise a cloud error" do
-        expect{
-          blob_manager.container_exist?(container_name)
-        }.to raise_error /container_exist/
-      end
-    end
-  end  
-
   describe "#delete_blob" do
     it "delete the blob" do
       expect(blob_service_client).to receive(:delete_blob).
