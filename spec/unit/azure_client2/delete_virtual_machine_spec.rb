@@ -159,6 +159,17 @@ describe Bosh::AzureCloud::AzureClient2 do
         }.to raise_error /get_token - http error: 404/
       end
 
+      it "should raise an error if tenant id, client id or client secret is invalid" do
+        stub_request(:post, token_uri).to_return(
+          :status => 401,
+          :body => '',
+          :headers => {})
+
+        expect {
+          azure_client2.delete_virtual_machine(vm_name)
+        }.to raise_error /get_token - Azure authentication failed: invalid tenant id, client id or client secret./
+      end
+
       it "should raise an error if authentication retry fails" do
         stub_request(:post, token_uri).to_return(
           :status => 200,
