@@ -15,7 +15,7 @@ module Bosh::AzureCloud
       @storage_account = @client2.get_storage_account_by_name(@azure_properties['storage_account_name'])
     end
 
-    def create(uuid, stemcell_uri, cloud_opts, network_configurator, resource_pool)
+    def create(uuid, stemcell_uri, network_configurator, resource_pool)
       subnet = @client2.get_network_subnet_by_name(network_configurator.virtual_network_name, network_configurator.subnet_name)
       raise "Cannot find the subnet #{network_configurator.virtual_network_name}/#{network_configurator.subnet_name}" if subnet.nil?
 
@@ -70,12 +70,12 @@ module Bosh::AzureCloud
         :location            => @storage_account[:location],
         :tags                => AZURE_TAGS,
         :vm_size             => resource_pool['instance_type'],
-        :username            => cloud_opts['ssh_user'],
+        :username            => @azure_properties['ssh_user'],
         :custom_data         => get_user_data(instance_id, network_configurator.dns),
         :image_uri           => stemcell_uri,
         :os_disk_name        => "#{OS_DISK_PREFIX}-#{instance_id}",
         :os_vhd_uri          => @disk_manager.get_disk_uri("#{OS_DISK_PREFIX}-#{instance_id}"),
-        :ssh_cert_data       => cloud_opts['ssh_certificate']
+        :ssh_cert_data       => @azure_properties['ssh_certificate']
       }
       @client2.create_virtual_machine(vm_params, network_interface, availability_set)
 
@@ -136,7 +136,8 @@ module Bosh::AzureCloud
     def attach_disk(instance_id, disk_name)
       @logger.info("attach_disk(#{instance_id}, #{disk_name})")
       disk_uri = @disk_manager.get_disk_uri(disk_name)
-      disk = @client2.attach_disk_to_virtual_machine(instance_id, disk_name, disk_uri)
+      caching = @disk_manager.get_caching(disk_name)
+      disk = @client2.attach_disk_to_virtual_machine(instance_id, disk_name, disk_uri, caching)
       "/dev/sd#{('c'.ord + disk[:lun]).chr}"
     end
 

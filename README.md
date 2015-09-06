@@ -28,6 +28,10 @@ These options are passed to the Azure CPI when it is instantiated.
   The content of the default certificate to use when spinning up new vms
 * `parallel_upload_thread_num` (optional)
   The number of threads to upload stemcells in parallel. The default value is 16.
+* `premium_storage_account_name` (optional)
+  Azure premiuim storage account name. You can see avaliable regions [here](http://azure.microsoft.com/en-us/regions/#services) .
+* `premium_storage_access_key` (optional)
+  Azure premiuim storage access key
 
 ### Registry options
 
@@ -48,18 +52,43 @@ overridden if needed.
 
 ### Resource pool options
 
-These options are specified under `cloud_options` in the `resource_pools` section of a BOSH deployment manifest.
+These options are specified under `cloud_properties` in the `resource_pools` section of a BOSH deployment manifest.
 
 * `instance_type` (required)
   which [type of instance](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-size-specs/) the VMs should belong to
 
+* `availability_set` (optional)
+  which [availability set](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) the VMs should belong to
+
+* `platform_update_domain_count` (optional)
+  The count of [update domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set
+
+* `platform_fault_domain_count` (optional)
+  The count of [fault domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set
+
+* `load_balancer` (optional)
+  which [load balancer](https://azure.microsoft.com/en-us/documentation/articles/load-balancer-overview/) the VMs should belong to. You need to create
+  the load balancer manually before configuring it.
+
 ### Network options
 
-These options are specified under `cloud_options` in the `networks` section of a BOSH deployment manifest.
+These options are specified under `cloud_properties` in the `networks` section of a BOSH deployment manifest.
 
 * `type` (required)
   can be either `dynamic` for a DHCP assigned IP by Azure, or 'manual' to use an assigned IP by BOSH director,
   or `vip` to use a reserved public IP (which needs to be already allocated)
+
+### Disk options
+
+These options are specified under `cloud_properties` in the `disk_pools` section of a BOSH deployment manifest.
+
+* `type` (optional)
+  can be either `standard` to use a standard data disk, or 'premium' to use a premium data disk. If 'premium' is set, you also need to
+  provide premium_storage_account_name and premium_storage_access_key. And you also should use DS-series or GS-series as instance_type.
+  See more information about [Azure premium storage](https://azure.microsoft.com/en-us/documentation/articles/storage-premium-storage-preview-portal/)
+
+* `caching` (optional)
+  can be either `None`, 'ReadOnly' or 'ReadWrite'. Default is 'None'
 
 ## Examples
 Below is a sample of how Azure specific properties are used in a BOSH deployment manifest:
@@ -95,8 +124,8 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
         gateway: 10.0.0.1
         dns: [8.8.8.8]
         cloud_properties:
-          virtual_network_name: boshnet
-          subnet_name: subnet1
+          virtual_network_name: boshvnet-crp
+          subnet_name: bosh
 
     resource_pools:
     - name: vms
@@ -109,11 +138,15 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
 
     disk_pools:
     - name: disks
-      disk_size: 25_000
+      disk_size: 24_576
+      cloud_properties:
+        type: standard
+        caching: None
 
     jobs:
     - name: bosh
       templates:
+      - {name: powerdns, release: bosh}
       - {name: nats, release: bosh}
       - {name: redis, release: bosh}
       - {name: postgres, release: bosh}
@@ -148,6 +181,26 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
           password: postgres-password
           database: bosh
           adapter: postgres
+
+        dns:
+          address: 10.0.0.4
+         db:
+            user: postgres
+            password: postgres-password
+            host: 127.0.0.1
+            listen_address: 127.0.0.1
+            database: bosh
+          user: powerdns
+          password: powerdns
+          database:
+            name: powerdns
+          webserver:
+            password: powerdns
+          replication:
+            basic_auth: replication:zxKDUBeCfKYXk
+            user: replication
+            password: powerdns
+          recursor: 10.0.0.4
 
         # Tells the Director/agents how to contact registry
         registry:
@@ -187,6 +240,9 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
           client_id: <your_client_id>
           client_secret: <your_client_secret>
           ssh_user: vcap
+          premium_storage_account_name: <your_premium_storage_account_name>
+          premium_storage_access_key: <your_premium_storage_access_key>
+          parallel_upload_thread_num: 16
           ssh_certificate: "-----BEGIN CERTIFICATE-----\n..."
 
         # Tells agents how to contact nats

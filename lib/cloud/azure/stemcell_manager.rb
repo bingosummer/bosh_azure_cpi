@@ -21,11 +21,6 @@ module Bosh::AzureCloud
       @blob_manager.delete_blob(STEMCELL_CONTAINER, "#{name}.vhd") if has_stemcell?(name)
     end
 
-    def stemcells
-      @logger.info("stemcells")
-      @blob_manager.list_blobs(STEMCELL_CONTAINER, STEMCELL_PREFIX)
-    end
-
     def create_stemcell(image_path, cloud_properties)
       @logger.info("create_stemcell(#{image_path}, #{cloud_properties})")
 

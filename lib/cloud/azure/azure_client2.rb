@@ -203,7 +203,12 @@ module Bosh::AzureCloud
       http_put(url, result)
     end
 
-    def attach_disk_to_virtual_machine(name, disk_name, disk_uri)
+    # Attach a specified disk to a VM
+    # @param [String] name Name of virtual machine.
+    # @param [String] disk_name Disk name.
+    # @param [String] disk_uri URI of disk
+    # @param [String] caching Caching option: None, ReadOnly or ReadWrite
+    def attach_disk_to_virtual_machine(name, disk_name, disk_uri, caching)
       url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_VIRTUAL_MACHINES, name)
       result = get_resource_by_id(url)
       if result.nil?
@@ -224,7 +229,7 @@ module Bosh::AzureCloud
         'name'         => disk_name,
         'lun'          => lun,
         'createOption' => 'Attach',
-        'caching'      => 'ReadWrite',
+        'caching'      => caching,
         'vhd'          => { 'uri' => disk_uri }
       }
       result['properties']['storageProfile']['dataDisks'].push(new_disk)
@@ -234,7 +239,7 @@ module Bosh::AzureCloud
         :name         => disk_name,
         :lun          => lun,
         :createOption => 'Attach',
-        :caching      => 'ReadWrite',
+        :caching      => caching,
         :vhd          => { :uri => disk_uri }
       }
     end
