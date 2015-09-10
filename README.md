@@ -11,9 +11,7 @@ These options are passed to the Azure CPI when it is instantiated.
 * `subscription_id` (required)
   Azure Subscription Id
 * `storage_account_name` (required)
-  Azure storage account name
-* `storage_access_key` (required)
-  Azure storage access key
+  Azure storage account name. Please make sure that those two containers 'bosh' and 'stemcell' are created in it.
 * `resource_group_name` (required)
   Resource group name to use when spinning up new vms
 * `tenant_id` (required)
@@ -28,10 +26,6 @@ These options are passed to the Azure CPI when it is instantiated.
   The content of the default certificate to use when spinning up new vms
 * `parallel_upload_thread_num` (optional)
   The number of threads to upload stemcells in parallel. The default value is 16.
-* `premium_storage_account_name` (optional)
-  Azure premiuim storage account name. You can see avaliable regions [here](http://azure.microsoft.com/en-us/regions/#services) .
-* `premium_storage_access_key` (optional)
-  Azure premiuim storage access key
 
 ### Registry options
 
@@ -57,14 +51,30 @@ These options are specified under `cloud_properties` in the `resource_pools` sec
 * `instance_type` (required)
   which [type of instance](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-size-specs/) the VMs should belong to
 
+* `storage_account_name` (optional)
+  which storage account the VMs should be created in. If this is not set, the VMs will be created in the default storage account.
+  If you use a different storage account which must be in the same resource group, please make sure
+  1) the permissions for the container 'stemcell' in the default storage account is set to Public read access for blobs only.
+  2) a table 'stemcells' is created in the default storage account.
+  3) two containers 'bosh' and 'stemcell' are created in the new storage account.
+  If you use DS-series or GS-series as instance_type, you should set this to a premium storage account.
+  See more information about [Azure premium storage](https://azure.microsoft.com/en-us/documentation/articles/storage-premium-storage-preview-portal/)
+  See avaliable regions [here](http://azure.microsoft.com/en-us/regions/#services) where you can create premium storage accounts.
+
+* `caching` (optional)
+  The caching option of the VMs' OS disks. Can be either 'None', 'ReadOnly' or 'ReadWrite'. Default is 'ReadWrite'
+
 * `availability_set` (optional)
-  which [availability set](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) the VMs should belong to
+  which [availability set](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) the VMs should belong to.
+  If it does exist, it will be created automatically.
 
 * `platform_update_domain_count` (optional)
-  The count of [update domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set
+  The count of [update domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set.
+  Default value is 5.
 
 * `platform_fault_domain_count` (optional)
-  The count of [fault domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set
+  The count of [fault domain](https://azure.microsoft.com/en-us/documentation/articles/virtual-machines-manage-availability/) in the availability set.
+  Default value is 3.
 
 * `load_balancer` (optional)
   which [load balancer](https://azure.microsoft.com/en-us/documentation/articles/load-balancer-overview/) the VMs should belong to. You need to create
@@ -82,13 +92,8 @@ These options are specified under `cloud_properties` in the `networks` section o
 
 These options are specified under `cloud_properties` in the `disk_pools` section of a BOSH deployment manifest.
 
-* `type` (optional)
-  can be either `standard` to use a standard data disk, or 'premium' to use a premium data disk. If 'premium' is set, you also need to
-  provide premium_storage_account_name and premium_storage_access_key. And you also should use DS-series or GS-series as instance_type.
-  See more information about [Azure premium storage](https://azure.microsoft.com/en-us/documentation/articles/storage-premium-storage-preview-portal/)
-
 * `caching` (optional)
-  can be either `None`, 'ReadOnly' or 'ReadWrite'. Default is 'None'
+  can be either 'None', 'ReadOnly' or 'ReadWrite'. Default is 'None'. Only 'None' and 'ReadOnly' are supported for premium disks.
 
 ## Examples
 Below is a sample of how Azure specific properties are used in a BOSH deployment manifest:
@@ -135,12 +140,13 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
         url: file://~/Downloads/stemcell.tgz
       cloud_properties:
         instance_type: Standard_D1
+        caching: ReadWrite
+        storage_account_name: <your_storage_account_name>
 
     disk_pools:
     - name: disks
       disk_size: 24_576
       cloud_properties:
-        type: standard
         caching: None
 
     jobs:
@@ -234,14 +240,11 @@ Below is a sample of how Azure specific properties are used in a BOSH deployment
           environment: AzureCloud
           subscription_id: <your_subscription_id>
           storage_account_name: <your_storage_account_name>
-          storage_access_key: <your_storage_access_key>
           resource_group_name: <your_resource_group_name>
           tenant_id: <your_tenant_id>
           client_id: <your_client_id>
           client_secret: <your_client_secret>
           ssh_user: vcap
-          premium_storage_account_name: <your_premium_storage_account_name>
-          premium_storage_access_key: <your_premium_storage_access_key>
           parallel_upload_thread_num: 16
           ssh_certificate: "-----BEGIN CERTIFICATE-----\n..."
 

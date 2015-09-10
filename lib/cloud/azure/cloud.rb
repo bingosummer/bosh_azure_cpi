@@ -81,16 +81,18 @@ module Bosh::AzureCloud
     #                  {#detach_disk}, and {#delete_vm}
     def create_vm(agent_id, stemcell_id, resource_pool, networks, disk_locality = nil, env = nil)
       with_thread_name("create_vm(#{agent_id}, ...)") do
-        unless @stemcell_manager.has_stemcell?(stemcell_id)
+        storage_account_name = @azure_properties['storage_account_name']
+        storage_account_name = resource_pool['storage_account_name'] if resource_pool.has_key?('storage_account_name')
+        unless @stemcell_manager.has_stemcell?(storage_account_name, stemcell_id)
           raise Bosh::Clouds::VMCreationFailed.new(false), "Given stemcell '#{stemcell_id}' does not exist"
         end
 
-        stemcell_uri = @stemcell_manager.get_stemcell_uri(stemcell_id)
         instance_id = @vm_manager.create(
           agent_id,
-          stemcell_uri,
-          NetworkConfigurator.new(networks),
-          resource_pool)
+          storage_account_name,
+          @stemcell_manager.get_stemcell_uri(storage_account_name, stemcell_id),
+          resource_pool,
+          NetworkConfigurator.new(networks))
         @logger.info("Created new vm '#{instance_id}'")
 
         begin
@@ -199,10 +201,15 @@ module Bosh::AzureCloud
     # @return [String] opaque id later used by {#attach_disk}, {#detach_disk}, and {#delete_disk}
     def create_disk(size, cloud_properties, instance_id = nil)
       with_thread_name("create_disk(#{size}, #{cloud_properties})") do
-        @logger.info("Create disk for vm #{instance_id}") unless instance_id.nil?
+        storage_account_name = @azure_properties['storage_account_name']
+        unless instance_id.nil?
+          @logger.info("Create disk for vm #{instance_id}")
+          storage_account_name = get_storage_account_name_from_instance_id(instance_id)
+        end
+
         validate_disk_size(size)
 
-        @disk_manager.create_disk(size/1024, cloud_properties)
+        @disk_manager.create_disk(storage_account_name, size/1024, cloud_properties)
       end
     end
 
@@ -247,7 +254,7 @@ module Bosh::AzureCloud
     # @param [String] disk_id disk id of the disk to take the snapshot of
     # @param [Hash] metadata metadata key/value pairs
     # @return [String] snapshot id
-    def snapshot_disk(disk_id, metadata={})
+    def snapshot_disk(disk_id, metadata = {})
       with_thread_name("snapshot_disk(#{disk_id},#{metadata})") do
         snapshot_id = @disk_manager.snapshot_disk(disk_id, encode_metadata(metadata))
 
@@ -319,7 +326,6 @@ module Bosh::AzureCloud
           "azure" => ["environment",
             "subscription_id",
             "storage_account_name",
-            "storage_access_key",
             "resource_group_name",
             "ssh_user",
             "ssh_certificate",
@@ -356,10 +362,12 @@ module Bosh::AzureCloud
     end
 
     def init_azure
-      @blob_manager     = Bosh::AzureCloud::BlobManager.new(azure_properties)
-      @stemcell_manager = Bosh::AzureCloud::StemcellManager.new(@blob_manager)
-      @disk_manager     = Bosh::AzureCloud::DiskManager.new(@blob_manager)
-      @vm_manager       = Bosh::AzureCloud::VMManager.new(azure_properties, @registry.endpoint, @disk_manager)
+      @azure_client2    = Bosh::AzureCloud::AzureClient2.new(azure_properties, @logger)
+      @blob_manager     = Bosh::AzureCloud::BlobManager.new(azure_properties, @azure_client2)
+      @table_manager    = Bosh::AzureCloud::TableManager.new(azure_properties, @azure_client2)
+      @stemcell_manager = Bosh::AzureCloud::StemcellManager.new(azure_properties, @blob_manager, @table_manager)
+      @disk_manager     = Bosh::AzureCloud::DiskManager.new(azure_properties, @blob_manager)
+      @vm_manager       = Bosh::AzureCloud::VMManager.new(azure_properties, @registry.endpoint, @disk_manager, @azure_client2)
     end
 
     # Generates initial agent settings. These settings will be read by agent

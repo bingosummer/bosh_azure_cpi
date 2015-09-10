@@ -119,6 +119,7 @@ module Bosh::AzureCloud
     # * +:image_uri+            - String. The URI of the image.
     # * +:os_disk_name+         - String. The name of the OS disk for the virtual machine instance.
     # * +:os_vhd_uri+           - String. The URI of the OS disk for the virtual machine instance.
+    # * #:caching+              - String. The caching option of the OS disk. Caching option: None, ReadOnly or ReadWrite
     # * +:ssh_cert_data+        - String. The content of SSH certificate.
     #
     def create_virtual_machine(vm_params, network_interface, availability_set = nil)
@@ -153,7 +154,7 @@ module Bosh::AzureCloud
               'name'         => vm_params[:os_disk_name],
               'osType'       => 'Linux',
               'createOption' => 'FromImage',
-              'caching'      => 'ReadWrite',
+              'caching'      => vm_params[:caching],
               'image'        => {
                 'uri' => vm_params[:image_uri]
               },
@@ -711,6 +712,23 @@ module Bosh::AzureCloud
       storage_account
     end
 
+    def get_storage_account_keys_by_name(name)
+      result = nil
+      begin
+        url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name, 'listKeys')
+        result = http_post(url)
+      rescue AzureNoFoundError => e
+        result = nil
+      end
+
+      keys = []
+      unless result.nil?
+        keys << result['key1']
+        keys << result['key2']
+      end
+      keys
+    end
+
     private
 
     def http(uri)
@@ -785,11 +803,15 @@ module Bosh::AzureCloud
     end
 
     def check_completion(response, options)
-      @logger.debug("check_completion - response code: #{response.code} response.body: \n#{response.body}")
+      @logger.debug("check_completion - response code: #{response.code} azure-asyncoperation: #{response['azure-asyncoperation']} response.body: \n#{response.body}")
 
       operation_status_link = response['azure-asyncoperation']
       if options[:return_code].include?(response.code.to_i)
-        return true if operation_status_link.nil?
+        if operation_status_link.nil?
+          result = true
+          ignore_exception{ result = JSON(response.body) } unless response.body.nil? || response.body.empty?
+          return result
+        end
       elsif !options[:success_code].include?(response.code.to_i)
         error = "#{options[:operation]} - error: #{response.code}"
         error += " message: #{response.body}" unless response.body.nil?

@@ -40,6 +40,7 @@ require 'cloud/azure/vm_manager'
 require 'cloud/azure/blob_manager'
 require 'cloud/azure/disk_manager'
 require 'cloud/azure/stemcell_manager'
+require 'cloud/azure/table_manager'
 
 require 'azure'
 
