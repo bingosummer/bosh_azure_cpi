@@ -389,7 +389,7 @@ module Bosh::AzureCloud
               "name" => vm_name
           },
           "agent_id" => agent_id,
-          "networks" => network_spec,
+          "networks" => agent_network_spec(network_spec),
           "disks" => {
               "system" => root_device_name,
               "ephemeral" => "/dev/sdb",
@@ -409,6 +409,13 @@ module Bosh::AzureCloud
       settings = registry.read_settings(instance_id)
       yield settings
       registry.update_settings(instance_id, settings)
+    end
+
+    def agent_network_spec(network_spec)
+      Hash[*network_spec.map do |name, settings|
+        settings["use_dhcp"] = true
+        [name, settings]
+      end.flatten]
     end
   end
 end
