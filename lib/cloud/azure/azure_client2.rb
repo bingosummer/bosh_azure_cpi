@@ -6,6 +6,7 @@ module Bosh::AzureCloud
   class AzureError < Bosh::Clouds::CloudError; end
   class AzureUnauthorizedError < AzureError; end
   class AzureNoFoundError < AzureError; end
+  class AzureConflictError < AzureError; end
 
   class AzureClient2
     include Helpers
@@ -815,6 +816,7 @@ module Bosh::AzureCloud
       elsif !options[:success_code].include?(response.code.to_i)
         error = "#{options[:operation]} - error: #{response.code}"
         error += " message: #{response.body}" unless response.body.nil?
+        raise AzureConflictError, error if response.code.to_i == HTTP_CODE_CONFLICT
         raise AzureError, error
       end
 

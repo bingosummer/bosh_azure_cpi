@@ -67,8 +67,7 @@ module Bosh::AzureCloud
             :platform_update_domain_count => resource_pool['platform_update_domain_count'] || 5,
             :platform_fault_domain_count  => resource_pool['platform_fault_domain_count'] || 3
           }
-          @azure_client2.create_availability_set(avset_params)
-          availability_set = @azure_client2.get_availability_set_by_name(resource_pool['availability_set'])
+          availability_set = create_availability_set(avset_params)
         end
       end
 
@@ -164,6 +163,20 @@ module Bosh::AzureCloud
       user_data[:server] = {name: vm_name}
       user_data[:dns] = {nameserver: dns} if dns
       Base64.strict_encode64(Yajl::Encoder.encode(user_data))
+    end
+
+    def create_availability_set(avset_params)
+      availability_set = nil
+      begin
+        @azure_client2.create_availability_set(avset_params)
+        availability_set = @azure_client2.get_availability_set_by_name(avset_params[:name])
+      rescue AzureConflictError => e
+        @logger.debug("create_availability_set - Another process is creating the same availability set #{avset_params[:name]}")
+        begin
+          availability_set = @azure_client2.get_availability_set_by_name(avset_params[:name])
+        end while availability_set.nil?
+      end
+      availability_set
     end
 
     def delete_availability_set(name)
