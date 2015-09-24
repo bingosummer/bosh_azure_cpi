@@ -268,7 +268,7 @@ module Bosh::AzureCloud
     # @return [void]
     def delete_snapshot(snapshot_id)
       with_thread_name("delete_snapshot(#{snapshot_id})") do
-        @disk_manager.delete_disk(snapshot_id)
+        @disk_manager.delete_snapshot(snapshot_id)
       end
     end
 

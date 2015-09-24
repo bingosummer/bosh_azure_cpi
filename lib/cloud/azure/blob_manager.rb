@@ -128,58 +128,12 @@ module Bosh::AzureCloud
       blobs
     end
 
-    def snapshot_blob(storage_account_name, container_name, blob_name, metadata, snapshot_blob_name)
-      @logger.info("snapshot_blob(#{storage_account_name}, #{container_name}, #{blob_name}, #{metadata}, #{snapshot_blob_name})")
+    def snapshot_blob(storage_account_name, container_name, blob_name, metadata)
+      @logger.info("snapshot_blob(#{storage_account_name}, #{container_name}, #{blob_name}, #{metadata})")
       initialize_blob_client(storage_account_name) do
-        start_time = Time.new
         snapshot_time = @blob_service_client.create_blob_snapshot(container_name, blob_name, {:metadata => metadata})
         @logger.debug("Snapshot time: #{snapshot_time}")
-
-        begin
-          # Reinitialize blob_service_client because of the issue https://github.com/Azure/azure-sdk-for-ruby/issues/276
-          keys = @azure_client2.get_storage_account_keys_by_name(storage_account_name)
-          @azure_client = Azure.client(storage_account_name: storage_account_name, storage_access_key: keys[0])
-          @azure_client.storage_blob_host = AZURE_ENVIRONMENTS[@azure_properties['environment']]['managementEndpointUrl'].gsub('management', "#{storage_account_name}.blob")
-          @blob_service_clients['storage_account_name'] = @azure_client.blobs
-          @blob_service_client = @blob_service_clients['storage_account_name']
-
-          @logger.info("Copying the snapshot of the blob #{container_name}/#{blob_name} to #{container_name}/#{snapshot_blob_name}")
-          copy_id, copy_status = @blob_service_client.copy_blob(container_name, snapshot_blob_name, container_name, blob_name, {:source_snapshot => snapshot_time})
-          @logger.info("Copy id: #{copy_id}, copy status: #{copy_status}")
-
-          copy_status_description = ""
-          while copy_status == "pending" do
-            blob = @blob_service_client.get_blob_properties(container_name, blob_name)
-            blob_props = blob.properties
-            if blob_props[:copy_id] != copy_id
-              cloud_error("The progress of copying the snapshot of the blob #{container_name}/#{blob_name} to #{container_name}/#{snapshot_blob_name} was interrupted by other copy operations.")
-            end
-
-            copy_status = blob_props[:copy_status]
-            copy_status_description = blob_props[:copy_status_description]
-            @logger.debug("Copying progress: #{blob_props[:copy_progress]}")
-          end
-
-          if copy_status == "success"
-            duration = Time.new - start_time
-            @logger.info("Take snapshot of the blob #{container_name}/#{blob_name} successfully. Duration: #{duration.inspect}")
-          else
-            cloud_error("Failed to copy the snapshot of the blob #{container_name}/#{blob_name}: \n\tcopy status: #{copy_status}\n\tcopy description: #{copy_status_description}")
-          end
-        rescue => e
-          ignore_exception {
-            @blob_service_client.delete_blob(container_name, snapshot_blob_name)
-            @logger.info("Delete the incomplete snapshot blob #{container_name}/#{snapshot_blob_name}")
-          }
-          raise e
-        ensure
-          ignore_exception {
-            @logger.info("Delete the snapshot #{snapshot_time} of the blob #{container_name}/#{blob_name}")
-            @blob_service_client.delete_blob(container_name, blob_name, {
-              :snapshot => snapshot_time
-            })
-          }
-        end
+        snapshot_time
       end
     end
 
@@ -356,6 +310,7 @@ module Bosh::AzureCloud
 
   private
 
+  # https://github.com/Azure/azure-sdk-for-ruby/issues/285
   class ExtendBlobService
     def initialize(blob_service_client)
       @blob_service_client = blob_service_client

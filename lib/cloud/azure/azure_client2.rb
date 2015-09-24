@@ -26,6 +26,7 @@ module Bosh::AzureCloud
     HTTP_CODE_CONFLICT            = 409
     HTTP_CODE_LENGTHREQUIRED      = 411
     HTTP_CODE_PRECONDITIONFAILED  = 412
+    HTTP_CODE_INTERNALSERVERERROR = 500
 
     REST_API_PROVIDER_COMPUTER           = 'Microsoft.Compute'
     REST_API_COMPUTER_VIRTUAL_MACHINES   = 'virtualMachines'
@@ -691,6 +692,77 @@ module Bosh::AzureCloud
     end
 
     # Storage/StorageAccounts
+    # https://msdn.microsoft.com/en-us/library/azure/mt163564.aspx
+    def create_storage_account(name, location, account_type, tags)
+      url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name)
+      storage_account = {
+        'location'   => location,
+        'tags'       => tags,
+        'properties' => {
+          'accountType' => account_type
+        }
+      }
+
+      uri = http_url(url)
+      @logger.info("create_storage_account - trying to put #{uri.to_s}")
+
+      request = Net::HTTP::Put.new(uri.request_uri)
+      request_body = storage_account.to_json
+      request.body = request_body
+      request['Content-Length'] = request_body.size
+      @logger.debug("create_storage_account - request body:\n#{request.body}")
+
+      response = http_get_response(uri, request)
+      @logger.debug("create_storage_account - response code: #{response.code}")
+
+      if response.code.to_i == HTTP_CODE_OK
+        return true
+      elsif response.code.to_i != HTTP_CODE_ACCEPTED
+        raise AzureError, "create_storage_account - Cannot create the storage account \"#{name}\". Error code: #{response.code}."
+      end
+
+      @logger.debug("create_storage_account - storage asynchronous operation: #{response['Location']}")
+      retry_after = response.key?('Retry-After') ? response['Retry-After'].to_i : 10
+      uri = URI(response['Location'])
+      params = {}
+      params['api-version'] = API_VERSION
+      request = Net::HTTP::Get.new(uri.request_uri)
+      uri.query = URI.encode_www_form(params)
+      request.add_field('x-ms-version', API_VERSION)
+      while true
+        sleep(retry_after)
+
+        @logger.debug("create_storage_account - trying to get the status of asynchronous operation: #{uri.to_s}")
+        response = http_get_response(uri, request)
+        status_code = response.code.to_i
+        @logger.debug("create_storage_account - #{status_code}\n#{response.body}")
+        if status_code == HTTP_CODE_OK
+          return true
+        elsif status_code != HTTP_CODE_ACCEPTED && status_code != HTTP_CODE_INTERNALSERVERERROR
+          raise AzureError, "create_storage_account - http error: #{response.code}"
+        end
+      end
+    end
+
+    def check_storage_account_name_availability(name)
+      url =  "/subscriptions/#{URI.escape(@azure_properties['subscription_id'])}"
+      url += "/providers/#{REST_API_PROVIDER_STORAGE}"
+      url += '/checkNameAvailability'
+      storage_account = {
+        'name' => name,
+        'type' => "#{REST_API_PROVIDER_STORAGE}/#{REST_API_STORAGE_ACCOUNTS}",
+      }
+
+      result = http_post(url, storage_account, 10)
+      raise AzureError, "Cannot check the availability of the storage account name \"#{name}\"." if result.nil?
+      ret = {
+        :available => result['nameAvailable'],
+        :reason    => result['reason'],
+        :message   => result['message']
+      }
+      ret
+    end
+
     def get_storage_account_by_name(name)
       url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name)
       get_storage_account(url)
@@ -834,7 +906,7 @@ module Bosh::AzureCloud
         response = http_get_response(uri, request)
         status_code = response.code.to_i
         @logger.debug("check_completion - #{status_code}\n#{response.body}")
-        if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_ACCEPTED
+        if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_ACCEPTED && status_code != HTTP_CODE_INTERNALSERVERERROR
           raise AzureError, "check_completion - http error: #{response.code}"
         end
 

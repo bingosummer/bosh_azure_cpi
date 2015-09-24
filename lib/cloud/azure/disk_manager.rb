@@ -33,10 +33,17 @@ module Bosh::AzureCloud
 
     def snapshot_disk(disk_name, metadata)
       @logger.info("snapshot_disk(#{disk_name}, #{metadata})")
-      storage_account_name, caching = parse_data_disk_name(disk_name)
-      snapshot_disk_name = generate_data_disk_name(storage_account_name, caching)
-      @blob_manager.snapshot_blob(storage_account_name, DISK_CONTAINER, "#{disk_name}.vhd", metadata, "#{snapshot_disk_name}.vhd")
-      snapshot_disk_name
+      storage_account_name = get_storage_account_name(disk_name)
+      snapshot_time = @blob_manager.snapshot_blob(storage_account_name, DISK_CONTAINER, "#{disk_name}.vhd", metadata)
+
+      generate_snapshot_id(disk_name, snapshot_time)
+    end
+
+    def delete_snapshot(snapshot_id)
+      @logger.info("delete_snapshot(#{snapshot_id})")
+      disk_name, snapshot_time = parse_snapshot_id(snapshot_id)
+      storage_account_name = get_storage_account_name(disk_name)
+      @blob_manager.delete_blob_snapshot(storage_account_name, DISK_CONTAINER, "#{disk_name}.vhd", snapshot_time)
     end
 
     ##
@@ -78,6 +85,7 @@ module Bosh::AzureCloud
       caching
     end
 
+    # bosh-os-STORAGEACCOUNTNAME-AGENTID
     def generate_os_disk_name(instance_id)
       "#{OS_DISK_PREFIX}-#{instance_id}"
     end
@@ -110,6 +118,7 @@ module Bosh::AzureCloud
       return storage_account_name, caching
     end
 
+    # bosh-data-STORAGEACCOUNTNAME-UUID-CACHING
     def generate_data_disk_name(storage_account_name, caching)
       "#{DATA_DISK_PREFIX}-#{storage_account_name}-#{SecureRandom.uuid}-#{caching}"
     end
@@ -123,6 +132,17 @@ module Bosh::AzureCloud
       else
         cloud_error("Invalid disk name #{disk_name}")
       end
+    end
+
+    # bosh-data-STORAGEACCOUNTNAME-UUID-CACHING--SNAPSHOTTIME
+    def generate_snapshot_id(disk_name, snapshot_time)
+      "#{disk_name}--#{snapshot_time}"
+    end
+
+    def parse_snapshot_id(snapshot_id)
+      ret = snapshot_id.match("^(.*)--(.*)$")
+      cloud_error("Invalid snapshot id #{snapshot_id}") if ret.nil?
+      return ret[1], ret[2]
     end
   end
 end
