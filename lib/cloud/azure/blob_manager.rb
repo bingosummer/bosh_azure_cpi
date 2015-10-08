@@ -298,10 +298,10 @@ module Bosh::AzureCloud
 
           @azure_client = Azure.client(storage_account_name: storage_account_name, storage_access_key: keys[0])
           @azure_client.storage_blob_host = AZURE_ENVIRONMENTS[@azure_properties['environment']]['managementEndpointUrl'].gsub('management', "#{storage_account_name}.blob")
-          @blob_service_clients['storage_account_name'] = @azure_client.blobs
+          @blob_service_clients[storage_account_name] = @azure_client.blobs
         end
 
-        @blob_service_client = @blob_service_clients['storage_account_name']
+        @blob_service_client = @blob_service_clients[storage_account_name]
         yield
       end
     end
