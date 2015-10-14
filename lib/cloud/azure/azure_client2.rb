@@ -6,6 +6,7 @@ module Bosh::AzureCloud
   class AzureError < Bosh::Clouds::CloudError; end
   class AzureUnauthorizedError < AzureError; end
   class AzureNoFoundError < AzureError; end
+  class AzureConflictError < AzureError; end
 
   class AzureClient2
     include Helpers
@@ -25,9 +26,11 @@ module Bosh::AzureCloud
     HTTP_CODE_CONFLICT            = 409
     HTTP_CODE_LENGTHREQUIRED      = 411
     HTTP_CODE_PRECONDITIONFAILED  = 412
+    HTTP_CODE_INTERNALSERVERERROR = 500
 
     REST_API_PROVIDER_COMPUTER           = 'Microsoft.Compute'
     REST_API_COMPUTER_VIRTUAL_MACHINES   = 'virtualMachines'
+    REST_API_COMPUTER_AVAILABILITY_SETS  = 'availabilitySets'
 
     REST_API_PROVIDER_NETWORK            = 'Microsoft.Network'
     REST_API_NETWORK_PUBLIC_IP_ADDRESSES = 'publicIPAddresses'
@@ -104,26 +107,30 @@ module Bosh::AzureCloud
     #
     # @param [Hash] vm_params         - Parameters for creating the virtual machine.
     # @param [Hash] network_interface - Network Interface Instance.
+    # @param [Hash] availability_set  - Availability set.
     #
     #  ==== Params
     #
     # Accepted key/value pairs are:
     # * +:name+                 - String. Name of virtual machine.
     # * +:location+             - String. The location where the virtual machine will be created.
+    # * +:tags+                 - Hash. Tags of virtual machine.
     # * +:vm_size+              - String. Specifies the size of the virtual machine instance.
     # * +:username+             - String. User name for the virtual machine instance.
     # * +:custom_data+          - String. Specifies a base-64 encoded string of custom data. 
     # * +:image_uri+            - String. The URI of the image.
     # * +:os_disk_name+         - String. The name of the OS disk for the virtual machine instance.
     # * +:os_vhd_uri+           - String. The URI of the OS disk for the virtual machine instance.
+    # * #:caching+              - String. The caching option of the OS disk. Caching option: None, ReadOnly or ReadWrite
     # * +:ssh_cert_data+        - String. The content of SSH certificate.
     #
-    def create_virtual_machine(vm_params, network_interface)
+    def create_virtual_machine(vm_params, network_interface, availability_set = nil)
       url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_VIRTUAL_MACHINES, vm_params[:name])
       vm = {
         'name'       => vm_params[:name],
         'location'   => vm_params[:location],
         'type'       => "#{REST_API_PROVIDER_COMPUTER}/#{REST_API_COMPUTER_VIRTUAL_MACHINES}",
+        'tags'       => vm_params[:metadata],
         'properties' => {
           'hardwareProfile' => {
             'vmSize' => vm_params[:vm_size]
@@ -149,7 +156,7 @@ module Bosh::AzureCloud
               'name'         => vm_params[:os_disk_name],
               'osType'       => 'Linux',
               'createOption' => 'FromImage',
-              'caching'      => 'ReadWrite',
+              'caching'      => vm_params[:caching],
               'image'        => {
                 'uri' => vm_params[:image_uri]
               },
@@ -167,6 +174,13 @@ module Bosh::AzureCloud
           }
         }
       }
+
+      unless availability_set.nil?
+        vm['properties']['availabilitySet'] = {
+          'id' => availability_set[:id]
+        }
+      end
+
       params = {
         'validating' => 'true'
       }
@@ -192,7 +206,12 @@ module Bosh::AzureCloud
       http_put(url, result)
     end
 
-    def attach_disk_to_virtual_machine(name, disk_name, disk_uri)
+    # Attach a specified disk to a VM
+    # @param [String] name Name of virtual machine.
+    # @param [String] disk_name Disk name.
+    # @param [String] disk_uri URI of disk
+    # @param [String] caching Caching option: None, ReadOnly or ReadWrite
+    def attach_disk_to_virtual_machine(name, disk_name, disk_uri, caching)
       url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_VIRTUAL_MACHINES, name)
       result = get_resource_by_id(url)
       if result.nil?
@@ -213,7 +232,7 @@ module Bosh::AzureCloud
         'name'         => disk_name,
         'lun'          => lun,
         'createOption' => 'Attach',
-        'caching'      => 'ReadWrite',
+        'caching'      => caching,
         'vhd'          => { 'uri' => disk_uri }
       }
       result['properties']['storageProfile']['dataDisks'].push(new_disk)
@@ -223,7 +242,7 @@ module Bosh::AzureCloud
         :name         => disk_name,
         :lun          => lun,
         :createOption => 'Attach',
-        :caching      => 'ReadWrite',
+        :caching      => caching,
         :vhd          => { :uri => disk_uri }
       }
     end
@@ -265,6 +284,10 @@ module Bosh::AzureCloud
         vm[:provisioning_state] = properties['provisioningState']
         vm[:size]               = properties['hardwareProfile']['vmSize']
 
+        unless properties['availabilitySet'].nil?
+          vm[:availability_set] = get_availability_set(properties['availabilitySet']['id'])
+        end
+
         storageProfile = properties['storageProfile']
         vm[:os_disk] = {}
         vm[:os_disk][:name]    = storageProfile['osDisk']['name']
@@ -290,6 +313,72 @@ module Bosh::AzureCloud
     def delete_virtual_machine(name)
       @logger.debug("delete_virtual_machine - trying to delete #{name}")
       url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_VIRTUAL_MACHINES, name)
+      http_delete(url, nil, 10)
+    end
+
+    # Compute/Availability Sets
+    # Public: Create an availability set based on the supplied configuration.
+    #
+    # ==== Attributes
+    #
+    # @param [Hash] avset_params        - Parameters for creating the availability set.
+    #
+    #  ==== Params
+    #
+    # Accepted key/value pairs are:
+    # * +:name+                         - String. Name of availability set.
+    # * +:location+                     - String. The location where the availability set will be created.
+    # * +:tags+                         - Hash. Tags of availability set.
+    # * +:platform_update_domain_count+ - Integer. Specifies the update domain count of availability set.
+    # * +:platform_fault_domain_count+  - Integer. Specifies the fault domain count of availability set.
+    #
+    def create_availability_set(avset_params)
+      url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_AVAILABILITY_SETS, avset_params[:name])
+      availability_set = {
+        'name'       => avset_params[:name],
+        'type'       => "#{REST_API_PROVIDER_COMPUTER}/#{REST_API_COMPUTER_AVAILABILITY_SETS}",
+        'location'   => avset_params[:location],
+        'tags'       => avset_params[:tags],
+        'properties' => {
+          'platformUpdateDomainCount' => avset_params[:platform_update_domain_count],
+          'platformFaultDomainCount'  => avset_params[:platform_fault_domain_count]
+        }
+      }
+      http_put(url, availability_set, 10)
+    end
+
+    def get_availability_set_by_name(name)
+      url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_AVAILABILITY_SETS, name)
+      get_availability_set(url)
+    end
+
+    def get_availability_set(url)
+      availability_set = nil
+      result = get_resource_by_id(url)
+      unless result.nil?
+        availability_set = {}
+        availability_set[:id]       = result['id']
+        availability_set[:name]     = result['name']
+        availability_set[:location] = result['location']
+        availability_set[:tags]     = result['tags']
+
+        properties = result['properties']
+        availability_set[:platform_update_domain_count] = properties['platformUpdateDomainCount']
+        availability_set[:platform_fault_domain_count]  = properties['platformFaultDomainCount']
+        availability_set[:virtual_machines]             = []
+
+        unless properties['virtualMachines'].nil?
+          properties['virtualMachines'].each do |vm|
+            availability_set[:virtual_machines].push({:id => vm["id"]})
+          end
+        end
+      end
+      availability_set
+    end
+
+    def delete_availability_set(name)
+      @logger.debug("delete_availability_set - trying to delete #{name}")
+      url = rest_api_url(REST_API_PROVIDER_COMPUTER, REST_API_COMPUTER_AVAILABILITY_SETS, name)
       http_delete(url, nil, 10)
     end
 
@@ -366,11 +455,12 @@ module Bosh::AzureCloud
     end
 
     # Network/Load Balancer
-    def create_load_balancer(name,  public_ip, tcp_endpoints = [], udp_endpoints = [])
+    def create_load_balancer(name,  public_ip, tags, tcp_endpoints = [], udp_endpoints = [])
       url = rest_api_url(REST_API_PROVIDER_NETWORK, REST_API_NETWORK_LOAD_BALANCERS, name)
       load_balancer = {
         'name'       => name,
         'location'   => public_ip[:location],
+        'tags'       => tags,
         'properties' => {
           'frontendIPConfigurations' => [
             'name'        => 'LBFE',
@@ -438,6 +528,7 @@ module Bosh::AzureCloud
         load_balancer[:id] = result['id']
         load_balancer[:name] = result['name']
         load_balancer[:location] = result['location']
+        load_balancer[:tags] = result['tags']
 
         properties = result['properties']
         load_balancer[:provisioning_state] = properties['provisioningState']
@@ -450,7 +541,8 @@ module Bosh::AzureCloud
           ip[:id]                           = frontend_ip['id']
           ip[:provisioning_state]           = frontend_ip['properties']['provisioningState']
           ip[:private_ip_allocation_method] = frontend_ip['properties']['privateIPAllocationMethod']
-          ip[:public_ip]                    = get_public_ip(frontend_ip['properties']['publicIPAddress']['id'])
+          ip[:private_ip]                   = frontend_ip['properties']['privateIPAddress'] unless frontend_ip['properties']['privateIPAddress'].nil?
+          ip[:public_ip]                    = get_public_ip(frontend_ip['properties']['publicIPAddress']['id']) unless frontend_ip['properties']['publicIPAddress'].nil?
           ip[:inbound_nat_rules]            = frontend_ip['properties']['inboundNatRules']
           load_balancer[:frontend_ip_configurations].push(ip)
         end
@@ -482,6 +574,7 @@ module Bosh::AzureCloud
     #
     # @param [Hash] nic_params    - Parameters for creating the network interface.
     # @param [Hash] subnet        - The subnet which the network interface is binded to.
+    # @param [Hash] tags          - The tags of the network interface.
     # @param [Hash] load_balancer - The load balancer which the network interface is binded to.
     #
     #  ==== Params
@@ -493,11 +586,12 @@ module Bosh::AzureCloud
     # * +:dns_servers    - Array. DNS servers. 
     # * +:public_ip      - Hash. The public IP which the network interface is binded to.
     #
-    def create_network_interface(nic_params, subnet, load_balancer = nil)
+    def create_network_interface(nic_params, subnet, tags, load_balancer = nil)
       url = rest_api_url(REST_API_PROVIDER_NETWORK, REST_API_NETWORK_INTERFACES, nic_params[:name])
       interface = {
         'name'       => nic_params[:name],
         'location'   => nic_params[:location],
+        'tags'       => tags,
         'properties' => {
           'ipConfigurations' => [
             {
@@ -544,6 +638,7 @@ module Bosh::AzureCloud
         interface[:id] = result['id']
         interface[:name] = result['name']
         interface[:location] = result['location']
+        interface[:tags] = result['tags']
 
         properties = result['properties']
         interface[:provisioning_state] = properties['provisioningState']
@@ -597,6 +692,77 @@ module Bosh::AzureCloud
     end
 
     # Storage/StorageAccounts
+    # https://msdn.microsoft.com/en-us/library/azure/mt163564.aspx
+    def create_storage_account(name, location, account_type, tags)
+      url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name)
+      storage_account = {
+        'location'   => location,
+        'tags'       => tags,
+        'properties' => {
+          'accountType' => account_type
+        }
+      }
+
+      uri = http_url(url)
+      @logger.info("create_storage_account - trying to put #{uri.to_s}")
+
+      request = Net::HTTP::Put.new(uri.request_uri)
+      request_body = storage_account.to_json
+      request.body = request_body
+      request['Content-Length'] = request_body.size
+      @logger.debug("create_storage_account - request body:\n#{request.body}")
+
+      response = http_get_response(uri, request)
+      @logger.debug("create_storage_account - response code: #{response.code}")
+
+      if response.code.to_i == HTTP_CODE_OK
+        return true
+      elsif response.code.to_i != HTTP_CODE_ACCEPTED
+        raise AzureError, "create_storage_account - Cannot create the storage account \"#{name}\". Error code: #{response.code}."
+      end
+
+      @logger.debug("create_storage_account - storage asynchronous operation: #{response['Location']}")
+      retry_after = response.key?('Retry-After') ? response['Retry-After'].to_i : 10
+      uri = URI(response['Location'])
+      params = {}
+      params['api-version'] = API_VERSION
+      request = Net::HTTP::Get.new(uri.request_uri)
+      uri.query = URI.encode_www_form(params)
+      request.add_field('x-ms-version', API_VERSION)
+      while true
+        sleep(retry_after)
+
+        @logger.debug("create_storage_account - trying to get the status of asynchronous operation: #{uri.to_s}")
+        response = http_get_response(uri, request)
+        status_code = response.code.to_i
+        @logger.debug("create_storage_account - #{status_code}\n#{response.body}")
+        if status_code == HTTP_CODE_OK
+          return true
+        elsif status_code != HTTP_CODE_ACCEPTED && status_code != HTTP_CODE_INTERNALSERVERERROR
+          raise AzureError, "create_storage_account - http error: #{response.code}"
+        end
+      end
+    end
+
+    def check_storage_account_name_availability(name)
+      url =  "/subscriptions/#{URI.escape(@azure_properties['subscription_id'])}"
+      url += "/providers/#{REST_API_PROVIDER_STORAGE}"
+      url += '/checkNameAvailability'
+      storage_account = {
+        'name' => name,
+        'type' => "#{REST_API_PROVIDER_STORAGE}/#{REST_API_STORAGE_ACCOUNTS}",
+      }
+
+      result = http_post(url, storage_account, 10)
+      raise AzureError, "Cannot check the availability of the storage account name \"#{name}\"." if result.nil?
+      ret = {
+        :available => result['nameAvailable'],
+        :reason    => result['reason'],
+        :message   => result['message']
+      }
+      ret
+    end
+
     def get_storage_account_by_name(name)
       url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name)
       get_storage_account(url)
@@ -617,6 +783,23 @@ module Bosh::AzureCloud
         storage_account[:primary_endpoints]  = properties['primaryEndpoints']
       end
       storage_account
+    end
+
+    def get_storage_account_keys_by_name(name)
+      result = nil
+      begin
+        url = rest_api_url(REST_API_PROVIDER_STORAGE, REST_API_STORAGE_ACCOUNTS, name, 'listKeys')
+        result = http_post(url)
+      rescue AzureNoFoundError => e
+        result = nil
+      end
+
+      keys = []
+      unless result.nil?
+        keys << result['key1']
+        keys << result['key2']
+      end
+      keys
     end
 
     private
@@ -692,29 +875,38 @@ module Bosh::AzureCloud
       response
     end
 
-    def check_completion(response, api_version, retry_after = 30)
-      @logger.debug("check_completion - response code: #{response.code} response.body: \n#{response.body}")
-      retry_after = response['retry-after'].to_i if response.key?('retry-after')
-      operation_status_link = response['azure-asyncoperation']
-      if operation_status_link.nil? || operation_status_link.empty?
-        raise AzureError, "check_completion - operation_status_link cannot be null."
-      end
-      operation_status_link.gsub!(' ', '%20')
+    def check_completion(response, options)
+      @logger.debug("check_completion - response code: #{response.code} azure-asyncoperation: #{response['azure-asyncoperation']} response.body: \n#{response.body}")
 
+      operation_status_link = response['azure-asyncoperation']
+      if options[:return_code].include?(response.code.to_i)
+        if operation_status_link.nil?
+          result = true
+          ignore_exception{ result = JSON(response.body) } unless response.body.nil? || response.body.empty?
+          return result
+        end
+      elsif !options[:success_code].include?(response.code.to_i)
+        error = "#{options[:operation]} - error: #{response.code}"
+        error += " message: #{response.body}" unless response.body.nil?
+        raise AzureConflictError, error if response.code.to_i == HTTP_CODE_CONFLICT
+        raise AzureError, error
+      end
+
+      operation_status_link.gsub!(' ', '%20')
       uri = URI(operation_status_link)
       params = {}
-      params['api-version'] = api_version
+      params['api-version'] = options[:api_version]
       request = Net::HTTP::Get.new(uri.request_uri)
       uri.query = URI.encode_www_form(params)
-      request.add_field('x-ms-version', api_version)
+      request.add_field('x-ms-version', options[:api_version])
       while true
-        sleep(retry_after)
+        sleep(options[:retry_after])
 
         @logger.debug("check_completion - trying to get the status of asynchronous operation: #{uri.to_s}")
         response = http_get_response(uri, request)
         status_code = response.code.to_i
         @logger.debug("check_completion - #{status_code}\n#{response.body}")
-        if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_ACCEPTED
+        if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_ACCEPTED && status_code != HTTP_CODE_INTERNALSERVERERROR
           raise AzureError, "check_completion - http error: #{response.code}"
         end
 
@@ -774,15 +966,14 @@ module Bosh::AzureCloud
         @logger.debug("http_put - request body:\n#{request.body}")
       end
       response = http_get_response(uri, request)
-      status_code = response.code.to_i
-      if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_CREATED
-        error = "http_put - error: #{response.code}"
-        error += " message: #{response.body}" unless response.body.nil?
-        raise AzureError, error
-      end
-      api_version = API_VERSION
-      api_version = params['api-version'] unless params['api-version'].nil?
-      check_completion(response, api_version, retry_after)
+      options = {
+        :operation    => 'http_put',
+        :return_code => [HTTP_CODE_OK],
+        :success_code => [HTTP_CODE_CREATED],
+        :api_version  => params['api-version'] || API_VERSION,
+        :retry_after  => response.key?('retry-after') ? response['retry-after'].to_i : retry_after
+      }
+      check_completion(response, options)
     end
 
     def http_delete(url, body = nil, retry_after = 10, params = {})
@@ -797,18 +988,14 @@ module Bosh::AzureCloud
         @logger.debug("http_put - request body:\n#{request.body}")
       end
       response = http_get_response(uri, request)
-      status_code = response.code.to_i
-      if status_code != HTTP_CODE_OK && status_code != HTTP_CODE_ACCEPTED && status_code != HTTP_CODE_NOCONTENT
-        error = "http_delete - error: #{response.code}"
-        error += " message: #{response.body}" unless response.body.nil?
-        raise AzureError, error
-      end
-
-      return true if status_code == HTTP_CODE_OK || status_code == HTTP_CODE_NOCONTENT
-
-      api_version = API_VERSION
-      api_version = params['api-version'] unless params['api-version'].nil?
-      check_completion(response, api_version, retry_after)
+      options = {
+        :operation    => 'http_delete',
+        :return_code => [HTTP_CODE_OK, HTTP_CODE_NOCONTENT],
+        :success_code => [HTTP_CODE_ACCEPTED],
+        :api_version  => params['api-version'] || API_VERSION,
+        :retry_after  => response.key?('retry-after') ? response['retry-after'].to_i : retry_after
+      }
+      check_completion(response, options)
     end
 
     def http_post(url, body = nil, retry_after = 30, params = {})
@@ -824,15 +1011,14 @@ module Bosh::AzureCloud
         @logger.debug("http_put - request body:\n#{request.body}")
       end
       response = http_get_response(uri, request)
-      status_code = response.code.to_i
-      if status_code != HTTP_CODE_ACCEPTED
-        error = "http_post - error: #{response.code}"
-        error += " message: #{response.body}" unless response.body.nil?
-        raise AzureError, error
-      end
-      api_version = API_VERSION
-      api_version = params['api-version'] unless params['api-version'].nil?
-      check_completion(response, api_version, retry_after)
+      options = {
+        :operation    => 'http_post',
+        :return_code => [HTTP_CODE_OK],
+        :success_code => [HTTP_CODE_ACCEPTED],
+        :api_version  => params['api-version'] || API_VERSION,
+        :retry_after  => response.key?('retry-after') ? response['retry-after'].to_i : retry_after
+      }
+      check_completion(response, options)
     end
   end
 end
