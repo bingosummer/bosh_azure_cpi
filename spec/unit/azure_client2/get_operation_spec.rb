@@ -12,11 +12,12 @@ describe Bosh::AzureCloud::AzureClient2 do
     )
   }
   let(:subscription_id) { mock_azure_properties['subscription_id'] }
-  let(:api_version) { mock_azure_properties['api_version'] }
+  let(:tenant_id) { mock_azure_properties['tenant_id'] }
+  let(:api_version) { '2015-05-01-preview' }
   let(:resource_group) { mock_azure_properties['resource_group_name'] }
   let(:request_id) { "fake-request-id" }
 
-  let(:token_uri) { "https://login.windows.net/#{subscription_id}/oauth2/token?api-version=#{api_version}" }
+  let(:token_uri) { "https://login.windows.net/#{tenant_id}/oauth2/token?api-version=#{api_version}" }
   let(:operation_status_link) { "https://management.azure.com/subscriptions/#{subscription_id}/operations/#{request_id}" }
 
   let(:valid_access_token) { "valid-access-token" }
@@ -65,6 +66,7 @@ describe Bosh::AzureCloud::AzureClient2 do
       "id" => "fake-id",
       "name" => "fake-name",
       "location" => "fake-location",
+      "tags" => "fake-tags",
       "properties" => {
         "provisioningState" => "fake-state",
         "frontendIPConfigurations" => [{
@@ -95,6 +97,7 @@ describe Bosh::AzureCloud::AzureClient2 do
       :id => "fake-id",
       :name => "fake-name",
       :location => "fake-location",
+      :tags => "fake-tags",
       :provisioning_state => "fake-state",
       :frontend_ip_configurations => [
         {
@@ -127,6 +130,7 @@ describe Bosh::AzureCloud::AzureClient2 do
       "id" => "fake-id",
       "name" => "fake-name",
       "location" => "fake-location",
+      "tags" => "fake-tags",
       "properties" => {
         "provisioningState" => "fake-state",
         "dnsSettings" => {
@@ -155,6 +159,7 @@ describe Bosh::AzureCloud::AzureClient2 do
       :id => "fake-id",
       :name => "fake-name",
       :location => "fake-location",
+      :tags => "fake-tags",
       :provisioning_state => "fake-state",
       :dns_settings => ["8.8.8.8"],
       :ip_configuration_id => "fake-id",

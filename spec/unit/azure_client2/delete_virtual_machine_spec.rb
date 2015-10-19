@@ -12,11 +12,12 @@ describe Bosh::AzureCloud::AzureClient2 do
     )
   }
   let(:subscription_id) { mock_azure_properties['subscription_id'] }
-  let(:api_version) { mock_azure_properties['api_version'] }
+  let(:tenant_id) { mock_azure_properties['tenant_id'] }
+  let(:api_version) { '2015-05-01-preview' }
   let(:resource_group) { mock_azure_properties['resource_group_name'] }
   let(:request_id) { "fake-request-id" }
 
-  let(:token_uri) { "https://login.windows.net/#{subscription_id}/oauth2/token?api-version=#{api_version}" }
+  let(:token_uri) { "https://login.windows.net/#{tenant_id}/oauth2/token?api-version=#{api_version}" }
   let(:operation_status_link) { "https://management.azure.com/subscriptions/#{subscription_id}/operations/#{request_id}" }
 
   let(:vm_name) { "fake-vm-name" }
@@ -94,21 +95,6 @@ describe Bosh::AzureCloud::AzureClient2 do
 
         # TODO
         it "should raise no error if operation status is InProgress at first and Succeeded finally" do
-        end
-
-        it "should raise an error if operation_status_link is null" do
-          stub_request(:delete, vm_uri).to_return(
-            :status => 202,
-            :body => '{}',
-            :headers => {})
-          stub_request(:get, operation_status_link).to_return(
-            :status => 200,
-            :body => '{"status":"Succeeded"}',
-            :headers => {})
-
-          expect {
-            azure_client2.delete_virtual_machine(vm_name)
-          }.to raise_error /check_completion - operation_status_link cannot be null./
         end
 
         it "should raise an error if check completion operation is not accepeted" do

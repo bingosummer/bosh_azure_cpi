@@ -12,11 +12,12 @@ describe Bosh::AzureCloud::AzureClient2 do
     )
   }
   let(:subscription_id) { mock_azure_properties['subscription_id'] }
-  let(:api_version) { mock_azure_properties['api_version'] }
+  let(:tenant_id) { mock_azure_properties['tenant_id'] }
+  let(:api_version) { '2015-05-01-preview' }
   let(:resource_group) { mock_azure_properties['resource_group_name'] }
   let(:request_id) { "fake-request-id" }
 
-  let(:token_uri) { "https://login.windows.net/#{subscription_id}/oauth2/token?api-version=#{api_version}" }
+  let(:token_uri) { "https://login.windows.net/#{tenant_id}/oauth2/token?api-version=#{api_version}" }
   let(:operation_status_link) { "https://management.azure.com/subscriptions/#{subscription_id}/operations/#{request_id}" }
 
   let(:vm_name) { "fake-vm-name" }
@@ -29,6 +30,7 @@ describe Bosh::AzureCloud::AzureClient2 do
   describe "#attach_disk_to_virtual_machine" do
     disk_name = "fake-disk-name"
     disk_uri = "fake-disk-uri"
+    caching = "ReadWrite"
     let(:vm_uri) { "https://management.azure.com//subscriptions/#{subscription_id}/resourceGroups/#{resource_group}/providers/Microsoft.Compute/virtualMachines/#{vm_name}?api-version=#{api_version}" }
     let(:response_body) {
       {
@@ -81,7 +83,7 @@ describe Bosh::AzureCloud::AzureClient2 do
           :headers => {})
 
         expect(
-          azure_client2.attach_disk_to_virtual_machine(vm_name, disk_name, disk_uri)
+          azure_client2.attach_disk_to_virtual_machine(vm_name, disk_name, disk_uri, caching)
         ).to eq(disk)
       end
     end
@@ -111,7 +113,7 @@ describe Bosh::AzureCloud::AzureClient2 do
           :headers => {})
 
         expect {
-          azure_client2.attach_disk_to_virtual_machine(vm_name, disk_name, disk_uri)
+          azure_client2.attach_disk_to_virtual_machine(vm_name, disk_name, disk_uri, caching)
         }.to raise_error /attach_disk_to_virtual_machine - cannot find the virtual machine by name/
       end
     end

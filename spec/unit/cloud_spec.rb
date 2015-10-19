@@ -3,29 +3,43 @@ require 'spec_helper'
 describe Bosh::AzureCloud::Cloud do
   let(:cloud) { mock_cloud }
   let(:registry) { mock_registry }
+  let(:azure_properties) { mock_azure_properties }
 
-  let(:azure) { instance_double('Bosh::AzureCloud::AzureClient') }
-  let(:vm_manager) { instance_double('Bosh::AzureCloud::VMManager') }
-  let(:disk_manager) { instance_double('Bosh::AzureCloud::DiskManager') }
+  let(:client2) { instance_double('Bosh::AzureCloud::AzureClient2') }
+  before do
+    allow(Bosh::AzureCloud::AzureClient2).to receive(:new).
+      and_return(client2)
+  end
+
+  let(:blob_manager) { instance_double('Bosh::AzureCloud::BlobManager') }
+  let(:table_manager) { instance_double('Bosh::AzureCloud::TableManager') }
   let(:stemcell_manager) { instance_double('Bosh::AzureCloud::StemcellManager') }
+  let(:disk_manager) { instance_double('Bosh::AzureCloud::DiskManager') }
+  let(:vm_manager) { instance_double('Bosh::AzureCloud::VMManager') }
+  before do
+    allow(Bosh::AzureCloud::BlobManager).to receive(:new).
+      and_return(blob_manager)
+    allow(Bosh::AzureCloud::TableManager).to receive(:new).
+      and_return(table_manager)
+    allow(Bosh::AzureCloud::StemcellManager).to receive(:new).
+      and_return(stemcell_manager)
+    allow(Bosh::AzureCloud::DiskManager).to receive(:new).
+      and_return(disk_manager)
+    allow(Bosh::AzureCloud::VMManager).to receive(:new).
+      and_return(vm_manager)
+  end
 
-  let(:instance_id) { "fake-instance-id" }
+  let(:uuid) { 'e55144a3-0c06-4240-8f15-9a7bc7b35d1f' }
+  let(:instance_id) { "#{MOCK_DEFAULT_STORAGE_ACCOUNT_NAME}-#{uuid}" }
   let(:disk_id) { "fake-disk-id" }
   let(:stemcell_id) { "fake-stemcell-id" }
   let(:agent_id) { "fake-agent-id" }
   let(:snapshot_id) { 'fake-snapshot-id' }
 
-  before do
-    allow(Bosh::AzureCloud::AzureClient).to receive(:new).and_return(azure)
-    allow(azure).to receive(:vm_manager).and_return(vm_manager)
-    allow(azure).to receive(:disk_manager).and_return(disk_manager)
-    allow(azure).to receive(:stemcell_manager).and_return(stemcell_manager)
-  end
-
   describe '#initialize' do
     context 'when all the required configurations are present' do
       it 'does not raise an error ' do
-        expect { cloud }.to_not raise_error
+        expect { cloud }.not_to raise_error
       end
     end
 
@@ -60,9 +74,12 @@ describe Bosh::AzureCloud::Cloud do
     let(:image_path) { "fake-image-path" }
 
     it 'should create a stemcell' do
-      expect(stemcell_manager).to receive(:create_stemcell).with(image_path, cloud_properties).and_return(stemcell_id)
+      expect(stemcell_manager).to receive(:create_stemcell).
+        with(image_path, cloud_properties).and_return(stemcell_id)
 
-      expect(cloud.create_stemcell(image_path, cloud_properties)).to eq(stemcell_id)
+      expect(
+        cloud.create_stemcell(image_path, cloud_properties)
+      ).to eq(stemcell_id)
     end
   end
 
@@ -75,8 +92,9 @@ describe Bosh::AzureCloud::Cloud do
   end
 
   describe '#create_vm' do
+    let(:storage_account_name) { azure_properties['storage_account_name'] }
     let(:stemcell_uri) {
-      "https://fakestorageaccount.blob.core.windows.net/fakecontainer/#{stemcell_id}.vhd"
+      "https://#{storage_account_name}.blob.core.windows.net/fakecontainer/#{stemcell_id}.vhd"
     }
     let(:resource_pool) { {} }
     let(:networks_spec) { {} }
@@ -85,12 +103,13 @@ describe Bosh::AzureCloud::Cloud do
     let(:network_configurator) { double("network configurator") }
 
     before do
-      allow(stemcell_manager).to receive(:has_stemcell?).with(stemcell_id).
+      allow(stemcell_manager).to receive(:has_stemcell?).
+        with(storage_account_name, stemcell_id).
         and_return(true)
-      allow(stemcell_manager).to receive(:get_stemcell_uri).with(stemcell_id).
+      allow(stemcell_manager).to receive(:get_stemcell_uri).
+        with(storage_account_name, stemcell_id).
         and_return(stemcell_uri)
       allow(vm_manager).to receive(:create).and_return(instance_id)
-
       allow(Bosh::AzureCloud::NetworkConfigurator).to receive(:new).
           with(networks_spec).
           and_return(network_configurator)
@@ -99,21 +118,26 @@ describe Bosh::AzureCloud::Cloud do
 
     context 'when everything is fine' do
       it 'raises no error' do
-        expect(cloud.create_vm(
-          agent_id,
-          stemcell_id,
-          resource_pool,
-          networks_spec,
-          disk_locality,
-          environment)).to eq(instance_id)
+        expect(
+          cloud.create_vm(
+            agent_id,
+            stemcell_id,
+            resource_pool,
+            networks_spec,
+            disk_locality,
+            environment
+          )
+        ).to eq(instance_id)
       end
     end
 
     context 'when stemcell_id is invalid' do
       before do
-        allow(stemcell_manager).to receive(:has_stemcell?).with(stemcell_id).
+        allow(stemcell_manager).to receive(:has_stemcell?).
+          with(storage_account_name, stemcell_id).
           and_return(false)
       end
+
       it 'raises an error' do
         expect {
           cloud.create_vm(
@@ -122,14 +146,16 @@ describe Bosh::AzureCloud::Cloud do
             resource_pool,
             networks_spec,
             disk_locality,
-            environment)
+            environment
+          )
         }.to raise_error("Given stemcell '#{stemcell_id}' does not exist")
       end
     end
 
     context 'when network configurator fails' do
       before do
-        allow(Bosh::AzureCloud::NetworkConfigurator).to receive(:new).and_raise(StandardError)
+        allow(Bosh::AzureCloud::NetworkConfigurator).to receive(:new).
+          and_raise(StandardError)
       end
 
       it 'failed to creat new vm' do
@@ -140,7 +166,8 @@ describe Bosh::AzureCloud::Cloud do
             resource_pool,
             networks_spec,
             disk_locality,
-            environment)
+            environment
+          )
         }.to raise_error
       end
     end
@@ -158,7 +185,8 @@ describe Bosh::AzureCloud::Cloud do
             resource_pool,
             networks_spec,
             disk_locality,
-            environment)
+            environment
+          )
         }.to raise_error
       end
     end
@@ -171,7 +199,14 @@ describe Bosh::AzureCloud::Cloud do
         expect(vm_manager).to receive(:delete).with(instance_id)
 
         expect {
-          cloud.create_vm(agent_id, stemcell_id, resource_pool, networks_spec, disk_locality, environment)
+          cloud.create_vm(
+            agent_id,
+            stemcell_id,
+            resource_pool,
+            networks_spec,
+            disk_locality,
+            environment
+          )
         }.to raise_error(StandardError)
       end
     end
@@ -189,8 +224,10 @@ describe Bosh::AzureCloud::Cloud do
     let(:instance) { double("instance") }
 
     before do
-      allow(vm_manager).to receive(:find).with(instance_id).and_return(instance)
-      allow(instance).to receive(:[]).with(:provisioning_state).and_return('Running')
+      allow(vm_manager).to receive(:find).with(instance_id).
+        and_return(instance)
+      allow(instance).to receive(:[]).with(:provisioning_state).
+        and_return('Running')
     end
 
     it 'returns true if the instance exists' do
@@ -203,7 +240,8 @@ describe Bosh::AzureCloud::Cloud do
     end
 
     it 'returns false if the instance state is deleting' do
-      allow(instance).to receive(:[]).with(:provisioning_state).and_return('Deleting')
+      allow(instance).to receive(:[]).with(:provisioning_state).
+        and_return('Deleting')
       expect(cloud.has_vm?(instance_id)).to be(false)
     end
   end
@@ -264,7 +302,7 @@ describe Bosh::AzureCloud::Cloud do
 
       it 'raises an error' do
         expect {
-          cloud.create_disk(disk_size, cloud_properties, 42)
+          cloud.create_disk(disk_size, cloud_properties, instance_id)
         }.to raise_error(
           ArgumentError,
           'disk size needs to be an integer'
@@ -277,7 +315,7 @@ describe Bosh::AzureCloud::Cloud do
 
       it 'raises an error' do
         expect {
-          cloud.create_disk(disk_size, cloud_properties, 42)
+          cloud.create_disk(disk_size, cloud_properties, instance_id)
         }.to raise_error /Azure CPI minimum disk size is 1 GiB/
       end
     end
@@ -287,7 +325,7 @@ describe Bosh::AzureCloud::Cloud do
 
       it 'raises an error' do
         expect {
-          cloud.create_disk(disk_size, cloud_properties, 42)
+          cloud.create_disk(disk_size, cloud_properties, instance_id)
         }.to raise_error /Azure CPI maximum disk size is 1 TiB/
       end
     end
@@ -305,7 +343,8 @@ describe Bosh::AzureCloud::Cloud do
     let(:volume_name) { '/dev/sdc' }
 
     before do
-      allow(vm_manager).to receive(:attach_disk).with(instance_id, disk_id).and_return(volume_name)
+      allow(vm_manager).to receive(:attach_disk).with(instance_id, disk_id).
+        and_return(volume_name)
     end
 
     it 'attaches the disk to the vm' do
@@ -319,8 +358,10 @@ describe Bosh::AzureCloud::Cloud do
         }
       }
 
-      expect(registry).to receive(:read_settings).with(instance_id).and_return(old_settings)
-      expect(registry).to receive(:update_settings).with(instance_id, new_settings).and_return(true)
+      expect(registry).to receive(:read_settings).with(instance_id).
+        and_return(old_settings)
+      expect(registry).to receive(:update_settings).
+        with(instance_id, new_settings).and_return(true)
 
       cloud.attach_disk(instance_id, disk_id)
     end
@@ -339,7 +380,7 @@ describe Bosh::AzureCloud::Cloud do
 
   describe "#delete_snapshot" do
     it 'should delete the snapshot' do
-      expect(disk_manager).to receive(:delete_disk).with(snapshot_id)
+      expect(disk_manager).to receive(:delete_snapshot).with(snapshot_id)
 
       cloud.delete_snapshot(snapshot_id)
     end

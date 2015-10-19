@@ -12,11 +12,12 @@ describe Bosh::AzureCloud::AzureClient2 do
     )
   }
   let(:subscription_id) { mock_azure_properties['subscription_id'] }
-  let(:api_version) { mock_azure_properties['api_version'] }
+  let(:tenant_id) { mock_azure_properties['tenant_id'] }
+  let(:api_version) { '2015-05-01-preview' }
   let(:resource_group) { mock_azure_properties['resource_group_name'] }
   let(:request_id) { "fake-request-id" }
 
-  let(:token_uri) { "https://login.windows.net/#{subscription_id}/oauth2/token?api-version=#{api_version}" }
+  let(:token_uri) { "https://login.windows.net/#{tenant_id}/oauth2/token?api-version=#{api_version}" }
   let(:operation_status_link) { "https://management.azure.com/subscriptions/#{subscription_id}/operations/#{request_id}" }
 
   let(:valid_access_token) { "valid-access-token" }
